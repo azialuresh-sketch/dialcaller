@@ -3,10 +3,20 @@ const { setCors, firebaseRest } = require('../_common');
 
 module.exports = async (req, res) => {
   setCors(req, res);
-  if (req.method === 'OPTIONS') return res.status(200).end();
-  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+  if (req.method === 'OPTIONS') {
+    return res.status(200).end();
+  }
+  if (req.method !== 'POST') {
+    return res.status(405).json({ error: 'Method not allowed' });
+  }
 
-  const { email, code } = req.body || {};
+  let body = req.body;
+  if (typeof body === 'string') {
+    try { body = JSON.parse(body); } catch { body = {}; }
+  }
+  body = body || {};
+
+  const { email, code } = body;
   if (!email || !code) {
     return res.status(400).json({ error: 'Email and verification code required' });
   }
@@ -17,22 +27,20 @@ module.exports = async (req, res) => {
     const saved = await firebaseRest(`dialcaller_auth_otps/${cleanEmail}`, 'GET');
 
     if (!saved || !saved.code) {
-      return res.status(400).json({ error: 'No verification code was requested for this email' });
+      return res.status(400).json({ error: 'No code requested for this email' });
     }
 
     if (Date.now() > saved.expiresAt) {
       await firebaseRest(`dialcaller_auth_otps/${cleanEmail}`, 'DELETE');
-      return res.status(400).json({ error: 'Code has expired. Please request a new one.' });
+      return res.status(400).json({ error: 'Code expired. Request a new one.' });
     }
 
     if (saved.code.trim() !== String(code).trim()) {
-      return res.status(400).json({ error: 'Invalid verification code' });
+      return res.status(400).json({ error: 'Incorrect verification code' });
     }
 
-    // Code matches! Clean up OTP
     await firebaseRest(`dialcaller_auth_otps/${cleanEmail}`, 'DELETE');
 
-    // Create a 7-day session token
     const token = crypto.randomBytes(32).toString('hex');
     const userSession = {
       token,
@@ -49,6 +57,6 @@ module.exports = async (req, res) => {
       email: userSession.email
     });
   } catch (err) {
-    return res.status(500).json({ error: 'Server validation error', details: err.message });
+    return res.status(500).json({ error: 'Server error', details: err.message });
   }
 };
