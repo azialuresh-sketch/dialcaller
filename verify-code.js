@@ -1,5 +1,4 @@
-const crypto = require('crypto');
-const { setCors, firebaseRest } = require('../_common');
+const { setCors, verifyToken, signToken } = require('../_common');
 
 module.exports = async (req, res) => {
   setCors(req, res);
@@ -16,47 +15,37 @@ module.exports = async (req, res) => {
   }
   body = body || {};
 
-  const { email, code } = body;
-  if (!email || !code) {
-    return res.status(400).json({ error: 'Email and verification code required' });
+  const { email, code, otpToken } = body;
+  if (!email || !code || !otpToken) {
+    return res.status(400).json({ error: 'Email, code, and verification session required' });
   }
 
-  const cleanEmail = email.trim().toLowerCase().replace(/[^a-z0-9]/g, '_');
+  const cleanEmail = email.trim().toLowerCase();
+  const payload = verifyToken(otpToken);
 
-  try {
-    const saved = await firebaseRest(`dialcaller_auth_otps/${cleanEmail}`, 'GET');
-
-    if (!saved || !saved.code) {
-      return res.status(400).json({ error: 'No code requested for this email' });
-    }
-
-    if (Date.now() > saved.expiresAt) {
-      await firebaseRest(`dialcaller_auth_otps/${cleanEmail}`, 'DELETE');
-      return res.status(400).json({ error: 'Code expired. Request a new one.' });
-    }
-
-    if (saved.code.trim() !== String(code).trim()) {
-      return res.status(400).json({ error: 'Incorrect verification code' });
-    }
-
-    await firebaseRest(`dialcaller_auth_otps/${cleanEmail}`, 'DELETE');
-
-    const token = crypto.randomBytes(32).toString('hex');
-    const userSession = {
-      token,
-      email: email.trim().toLowerCase(),
-      createdAt: Date.now(),
-      expiresAt: Date.now() + (7 * 24 * 60 * 60 * 1000)
-    };
-
-    await firebaseRest(`dialcaller_sessions/${token}`, 'PUT', userSession);
-
-    return res.status(200).json({
-      success: true,
-      token,
-      email: userSession.email
-    });
-  } catch (err) {
-    return res.status(500).json({ error: 'Server error', details: err.message });
+  if (!payload) {
+    return res.status(400).json({ error: 'Verification code has expired or is invalid. Request a new one.' });
   }
+
+  if (payload.email !== cleanEmail) {
+    return res.status(400).json({ error: 'Email mismatch. Request a new code.' });
+  }
+
+  if (payload.code !== String(code).trim()) {
+    return res.status(400).json({ error: 'Incorrect 6-digit code. Please try again.' });
+  }
+
+  // Code is 100% verified! Issue a 7-day Host Session Token
+  const sessionToken = signToken({
+    email: cleanEmail,
+    role: 'host',
+    iat: Date.now(),
+    exp: Date.now() + (7 * 24 * 60 * 60 * 1000)
+  });
+
+  return res.status(200).json({
+    success: true,
+    token: sessionToken,
+    email: cleanEmail
+  });
 };

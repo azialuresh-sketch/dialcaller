@@ -1,4 +1,4 @@
-const { setCors, firebaseRest } = require('../_common');
+const { setCors, signToken } = require('../_common');
 
 module.exports = async (req, res) => {
   setCors(req, res);
@@ -20,23 +20,22 @@ module.exports = async (req, res) => {
     return res.status(400).json({ error: 'Valid email required' });
   }
 
-  const cleanEmail = email.trim().toLowerCase().replace(/[^a-z0-9]/g, '_');
+  const cleanEmail = email.trim().toLowerCase();
+  // 6-digit random code
   const code = Math.floor(100000 + Math.random() * 900000).toString();
-  const expiresAt = Date.now() + (10 * 60 * 1000);
+  const expiresAt = Date.now() + (15 * 60 * 1000); // 15 mins
 
-  try {
-    await firebaseRest(`dialcaller_auth_otps/${cleanEmail}`, 'PUT', {
-      email: email.trim().toLowerCase(),
-      code,
-      expiresAt
-    });
+  // Cryptographically sign the code into an otpToken
+  const otpToken = signToken({
+    email: cleanEmail,
+    code,
+    exp: expiresAt
+  });
 
-    return res.status(200).json({
-      success: true,
-      message: 'Verification code generated',
-      previewCode: code
-    });
-  } catch (err) {
-    return res.status(500).json({ error: 'Server error saving code', details: err.message });
-  }
+  return res.status(200).json({
+    success: true,
+    message: 'Verification code generated',
+    otpToken,
+    code // Previewed directly so user can verify instantly
+  });
 };

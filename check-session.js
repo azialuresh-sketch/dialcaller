@@ -1,4 +1,4 @@
-const { setCors, firebaseRest } = require('../_common');
+const { setCors, verifyToken } = require('../_common');
 
 module.exports = async (req, res) => {
   setCors(req, res);
@@ -12,18 +12,13 @@ module.exports = async (req, res) => {
     return res.status(200).json({ loggedIn: false });
   }
 
-  try {
-    const session = await firebaseRest(`dialcaller_sessions/${token}`, 'GET');
-    if (!session || Date.now() > session.expiresAt) {
-      if (session) await firebaseRest(`dialcaller_sessions/${token}`, 'DELETE');
-      return res.status(200).json({ loggedIn: false });
-    }
-
-    return res.status(200).json({
-      loggedIn: true,
-      email: session.email
-    });
-  } catch (err) {
-    return res.status(500).json({ error: 'Session check failed', details: err.message });
+  const payload = verifyToken(token);
+  if (!payload || !payload.email) {
+    return res.status(200).json({ loggedIn: false });
   }
+
+  return res.status(200).json({
+    loggedIn: true,
+    email: payload.email
+  });
 };
